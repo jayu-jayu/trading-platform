@@ -20,6 +20,10 @@ class BacktestRun(Base):
     start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     end_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
+    # Optional reproducibility metadata
+    strategy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    git_commit_hash: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
     total_trades: Mapped[int] = mapped_column(Integer, default=0)
     institutional_trades: Mapped[int] = mapped_column(Integer, default=0)
     developing_trades: Mapped[int] = mapped_column(Integer, default=0)
