@@ -1,0 +1,848 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Signal Deck · NSE Intraday Stocks &amp; ETFs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --base: #0B0E17;
+    --surface: #131A28;
+    --surface2: #1A2333;
+    --hairline: #26304A;
+    --cyan: #22D3EE;
+    --cyan-dim: #0E5A69;
+    --amber: #FBBF24;
+    --amber-dim: #7A5A0E;
+    --emerald: #34D399;
+    --emerald-dim: #146B4D;
+    --rose: #FB7185;
+    --rose-dim: #7A2536;
+    --ink: #E8EEF7;
+    --muted: #93A1B8;
+    --faint: #4B5872;
+    --radius: 12px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--base);
+    color: var(--ink);
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+  .display { font-family: 'Space Grotesk', sans-serif; }
+
+  a { color: inherit; }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* ---------- Ticker bar ---------- */
+  .ticker-bar {
+    position: sticky; top: 0; z-index: 40;
+    background: linear-gradient(180deg, #0D1220 0%, #0B0E17 100%);
+    border-bottom: 1px solid var(--hairline);
+    padding: 8px 20px;
+    display: flex; align-items: center; gap: 22px;
+    overflow-x: auto;
+    font-size: 12px;
+  }
+  .ticker-item { display: flex; align-items: center; gap: 7px; white-space: nowrap; color: var(--muted); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .dot.open { background: var(--emerald); box-shadow: 0 0 8px var(--emerald); }
+  .dot.closed { background: var(--rose); box-shadow: 0 0 8px var(--rose); }
+  .dot.window { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+  .pill {
+    padding: 2px 9px; border-radius: 999px; font-weight: 600; font-size: 11px;
+    letter-spacing: 0.03em;
+  }
+  .pill.bullish { background: rgba(52,211,153,0.14); color: var(--emerald); border: 1px solid var(--emerald-dim); }
+  .pill.bearish { background: rgba(251,113,133,0.14); color: var(--rose); border: 1px solid var(--rose-dim); }
+  .pill.unknown { background: rgba(147,161,184,0.1); color: var(--muted); border: 1px solid var(--hairline); }
+
+  /* ---------- Signature: radar sweep ---------- */
+  .radar {
+    position: relative; width: 22px; height: 22px; flex-shrink: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(34,211,238,0.08) 0%, transparent 70%);
+  }
+  .radar::before {
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 0deg, var(--cyan) 18deg, transparent 45deg);
+    animation: sweep 2.4s linear infinite;
+    opacity: 0.85;
+  }
+  .radar::after {
+    content: ""; position: absolute; top: 50%; left: 50%; width: 5px; height: 5px;
+    background: var(--cyan); border-radius: 50%; transform: translate(-50%, -50%);
+    box-shadow: 0 0 6px var(--cyan);
+  }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .radar::before { animation: none; }
+  }
+
+  /* ---------- Header ---------- */
+  header.app-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 22px 24px 6px;
+    max-width: 1360px; margin: 0 auto;
+  }
+  .brand h1 {
+    margin: 0; font-size: 22px; letter-spacing: -0.01em;
+  }
+  .brand p { margin: 2px 0 0; color: var(--faint); font-size: 12.5px; }
+  .header-actions { display: flex; gap: 10px; }
+  .btn {
+    border: 1px solid var(--hairline); background: var(--surface);
+    color: var(--muted); border-radius: 8px; padding: 8px 14px;
+    font-size: 12.5px; font-weight: 500; transition: all 0.15s ease;
+  }
+  .btn:hover { border-color: var(--cyan-dim); color: var(--cyan); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--cyan) 0%, #0891B2 100%);
+    color: #04141A; border: none; font-weight: 700;
+    box-shadow: 0 0 16px rgba(34,211,238,0.25);
+  }
+  .btn.primary:hover { filter: brightness(1.08); }
+
+  /* ---------- Layout ---------- */
+  main {
+    max-width: 1360px; margin: 0 auto; padding: 18px 24px 60px;
+    display: grid; grid-template-columns: 1fr 380px; gap: 22px;
+  }
+  section.feed-col { min-width: 0; }
+  aside.side-col { display: flex; flex-direction: column; gap: 18px; }
+
+  .rule-strip {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px;
+  }
+  .rule-chip {
+    font-size: 11px; font-family: 'IBM Plex Mono', monospace;
+    padding: 5px 10px; border-radius: 7px; border: 1px solid var(--hairline);
+    color: var(--faint); background: var(--surface);
+  }
+
+  .feed-heading { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+  .feed-heading h2 { font-size: 15px; margin: 0; }
+  .feed-heading .count { color: var(--faint); font-weight: 400; margin-left: 6px; }
+
+  .signal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius);
+    padding: 15px; transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .card:hover { border-color: var(--cyan-dim); transform: translateY(-1px); }
+
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .symbol-row { display: flex; align-items: center; gap: 7px; }
+  .symbol-row h3 { margin: 0; font-size: 16px; font-family: 'Space Grotesk', sans-serif; }
+  .badge {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em;
+    padding: 2px 6px; border-radius: 5px; font-family: 'IBM Plex Mono', monospace;
+  }
+  .badge.buy { background: rgba(52,211,153,0.16); color: var(--emerald); border: 1px solid var(--emerald-dim); }
+  .badge.etf { background: rgba(251,191,36,0.14); color: var(--amber); border: 1px solid var(--amber-dim); }
+  .badge.stock { background: rgba(34,211,238,0.12); color: var(--cyan); border: 1px solid var(--cyan-dim); }
+  .badge.developing {
+    background: rgba(251,191,36,0.14); color: var(--amber); border: 1px solid var(--amber-dim);
+  }
+  .card.developing-card { border-style: dashed; }
+  .card.developing-card:hover { border-color: var(--amber-dim); }
+  .open-btn.developing-btn {
+    background: linear-gradient(135deg, var(--amber) 0%, #B45309 100%);
+    color: #1F1400; box-shadow: 0 0 14px rgba(251,191,36,0.18);
+  }
+  .timestamp { font-size: 10.5px; color: var(--faint); font-family: 'IBM Plex Mono', monospace; margin-top: 3px; }
+
+  .strength-wrap { display: flex; align-items: center; gap: 6px; }
+  .strength-bar { width: 46px; height: 5px; border-radius: 999px; background: var(--hairline); overflow: hidden; }
+  .strength-fill { height: 100%; border-radius: 999px; }
+  .strength-val { font-size: 11px; font-family: 'IBM Plex Mono', monospace; }
+
+  .price-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+  .price-cell .label { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--faint); }
+  .price-cell .value { font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; font-weight: 600; margin-top: 2px; }
+  .price-cell.target .value { color: var(--emerald); }
+  .price-cell.sl .value { color: var(--rose); }
+
+  .stats-row {
+    display: flex; flex-wrap: wrap; gap: 8px; font-size: 10.5px; color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace; margin-bottom: 10px;
+  }
+  .stats-row span.sep { color: var(--hairline); }
+
+  .rules-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+  .rule-tag {
+    font-size: 9.5px; font-family: 'IBM Plex Mono', monospace;
+    padding: 2px 7px; border-radius: 5px; background: var(--surface2);
+    color: var(--muted); border: 1px solid var(--hairline);
+  }
+
+  .open-btn {
+    width: 100%; padding: 9px; border-radius: 8px; border: none;
+    background: linear-gradient(135deg, var(--emerald) 0%, #059669 100%);
+    color: #05170F; font-weight: 700; font-size: 12.5px;
+    box-shadow: 0 0 14px rgba(52,211,153,0.2);
+  }
+  .open-btn:hover { filter: brightness(1.08); }
+  .open-btn:disabled { opacity: 0.5; filter: none; cursor: default; }
+
+  .empty-state {
+    grid-column: 1 / -1; background: var(--surface); border: 1px dashed var(--hairline);
+    border-radius: var(--radius); padding: 36px 20px; text-align: center;
+  }
+  .empty-state p.title { color: var(--muted); font-size: 14px; margin: 0 0 4px; }
+  .empty-state p.sub { color: var(--faint); font-size: 12px; margin: 0; }
+
+  /* ---------- Diagnostics panel ---------- */
+  .diagnostics-section { grid-column: 1 / -1; margin-top: 22px; }
+  .diag-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+  .diag-head h2 { font-size: 15px; margin: 0; }
+  .diag-head p { margin: 2px 0 0; font-size: 11.5px; color: var(--faint); }
+  .diag-filters { display: flex; gap: 6px; }
+  .diag-filter {
+    background: none; border: 1px solid var(--hairline); color: var(--faint);
+    font-size: 10.5px; padding: 4px 10px; border-radius: 999px; font-family: 'IBM Plex Mono', monospace;
+  }
+  .diag-filter.active { color: var(--base); background: var(--cyan); border-color: var(--cyan); font-weight: 700; }
+
+  .tier-badge {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em; padding: 2px 8px;
+    border-radius: 5px; font-family: 'IBM Plex Mono', monospace; white-space: nowrap;
+  }
+  .tier-badge.institutional { background: rgba(52,211,153,0.16); color: var(--emerald); border: 1px solid var(--emerald-dim); }
+  .tier-badge.developing { background: rgba(251,191,36,0.14); color: var(--amber); border: 1px solid var(--amber-dim); }
+  .tier-badge.weak { background: rgba(147,161,184,0.08); color: var(--faint); border: 1px solid var(--hairline); }
+  .tier-badge.no_data { background: rgba(251,113,133,0.1); color: var(--rose); border: 1px solid var(--rose-dim); }
+
+  .diag-table-wrap { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); overflow: hidden; }
+  table.diag-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.diag-table th {
+    text-align: left; font-size: 9.5px; text-transform: uppercase; color: var(--faint);
+    letter-spacing: 0.04em; padding: 10px 14px; font-weight: 500; border-bottom: 1px solid var(--hairline);
+  }
+  .diag-row { border-bottom: 1px solid var(--hairline); cursor: pointer; }
+  .diag-row:hover { background: var(--surface2); }
+  .diag-row td { padding: 9px 14px; vertical-align: middle; }
+  .diag-row .sym { font-family: 'Space Grotesk', sans-serif; font-weight: 500; }
+  .rule-dots { display: flex; gap: 4px; }
+  .rule-dot {
+    width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0;
+  }
+  .rule-dot.pass { background: var(--emerald); box-shadow: 0 0 5px rgba(52,211,153,0.5); }
+  .rule-dot.fail { background: var(--rose-dim); }
+  .diag-detail-row td { padding: 0 14px 14px; background: var(--surface2); }
+  .diag-detail-row.hidden { display: none; }
+  .detail-rule-line { display: flex; gap: 8px; padding: 5px 0; font-size: 11.5px; border-top: 1px dashed var(--hairline); }
+  .detail-rule-line:first-child { border-top: none; }
+  .detail-rule-line .rl-status { width: 46px; flex-shrink: 0; font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 10px; }
+  .detail-rule-line .rl-status.pass { color: var(--emerald); }
+  .detail-rule-line .rl-status.fail { color: var(--rose); }
+  .detail-rule-line .rl-label { width: 150px; flex-shrink: 0; color: var(--muted); font-size: 11px; }
+  .detail-rule-line .rl-detail { color: var(--faint); font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; }
+
+  @media (max-width: 880px) {
+    .rule-dots { flex-wrap: wrap; }
+    .detail-rule-line { flex-direction: column; gap: 2px; }
+    .detail-rule-line .rl-label { width: auto; }
+  }
+
+  /* ---------- Sidebar panels ---------- */
+  .panel { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); overflow: hidden; }
+  .panel-head { padding: 13px 16px; border-bottom: 1px solid var(--hairline); }
+  .panel-head h2 { margin: 0; font-size: 13.5px; font-family: 'Space Grotesk', sans-serif; }
+  .panel-head p { margin: 2px 0 0; font-size: 11px; color: var(--faint); }
+
+  .portfolio-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--hairline); }
+  .pstat .label { font-size: 9.5px; text-transform: uppercase; color: var(--faint); letter-spacing: 0.04em; }
+  .pstat .value { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; margin-top: 3px; }
+  .pstat .value.pos { color: var(--emerald); }
+  .pstat .value.neg { color: var(--rose); }
+
+  .positions-list { padding: 14px 16px; }
+  .positions-list .sec-label { font-size: 9.5px; text-transform: uppercase; color: var(--faint); letter-spacing: 0.04em; margin-bottom: 8px; }
+  .position-row {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--surface2); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px;
+    font-size: 12px;
+  }
+  .position-row .pname { font-family: 'Space Grotesk', sans-serif; font-weight: 500; }
+  .position-row .pmeta { font-family: 'IBM Plex Mono', monospace; color: var(--faint); font-size: 10.5px; }
+  .close-link { color: var(--amber); font-size: 11px; font-family: 'IBM Plex Mono', monospace; background: none; border: none; }
+  .close-link:hover { text-decoration: underline; }
+  .no-positions { color: var(--faint); font-size: 12px; }
+
+  .watchlist-tabs { display: flex; gap: 4px; padding: 10px 16px 0; }
+  .wtab {
+    background: none; border: 1px solid var(--hairline); color: var(--faint);
+    font-size: 11px; padding: 5px 11px; border-radius: 999px;
+  }
+  .wtab.active { color: var(--base); background: var(--cyan); border-color: var(--cyan); font-weight: 700; }
+
+  table.wl-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.wl-table th {
+    text-align: left; font-size: 9.5px; text-transform: uppercase; color: var(--faint);
+    letter-spacing: 0.04em; padding: 8px 16px 6px; font-weight: 500;
+  }
+  table.wl-table th.num, table.wl-table td.num { text-align: right; }
+  table.wl-table td { padding: 6px 16px; border-top: 1px solid var(--hairline); font-family: 'IBM Plex Mono', monospace; }
+  table.wl-table tbody tr:hover { background: var(--surface2); }
+  .chg.up { color: var(--emerald); }
+  .chg.down { color: var(--rose); }
+  .wl-scroll { max-height: 340px; overflow-y: auto; }
+
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--surface2); border: 1px solid var(--rose-dim); color: var(--rose);
+    padding: 10px 18px; border-radius: 9px; font-size: 12.5px; z-index: 50;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+
+  @media (max-width: 880px) {
+    main { grid-template-columns: 1fr; }
+    .ticker-bar { font-size: 11px; gap: 14px; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="ticker-bar" id="tickerBar">
+    <div class="ticker-item"><div class="radar"></div><span>SIGNAL DECK</span></div>
+    <div class="ticker-item"><span class="dot" id="marketDot"></span><span id="marketStatusText">Checking market status…</span></div>
+    <div class="ticker-item"><span class="dot window" id="windowDot" style="opacity:0.3"></span><span id="windowText">Signal window 09:15–15:15 IST</span></div>
+    <div class="ticker-item"><span class="pill unknown" id="regimePill">REGIME: —</span></div>
+    <div class="ticker-item mono" id="clockText">--:--:--</div>
+    <div class="ticker-item mono" id="lastScanText" style="margin-left:auto;">Last scan: —</div>
+  </div>
+
+  <header class="app-header">
+    <div class="brand">
+      <h1 class="display">Signal Deck</h1>
+      <p>NSE Intraday Stocks &amp; ETFs · Refined 6-Rule Institutional Engine</p>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="scanBtn">Scan Now</button>
+      <button class="btn primary" id="refreshBtn">Refresh All</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="feed-col">
+      <div class="rule-strip">
+        <span class="rule-chip">① VWAP Cross &amp; Hold</span>
+        <span class="rule-chip">② ATR Breakout</span>
+        <span class="rule-chip">③ Volume Spike ≥1.5x</span>
+        <span class="rule-chip">④ Nifty Gatekeeper</span>
+        <span class="rule-chip">⑤ RSI Momentum Reversal</span>
+        <span class="rule-chip">⑥ Sector/ETF Correlation</span>
+      </div>
+
+      <div class="feed-heading">
+        <h2>Live Institutional Signals <span class="count" id="signalCount">(0)</span></h2>
+      </div>
+
+      <div class="signal-grid" id="signalGrid">
+        <div class="empty-state">
+          <p class="title">Loading signals…</p>
+        </div>
+      </div>
+    </section>
+
+    <aside class="side-col">
+      <div class="panel" id="portfolioPanel">
+        <div class="panel-head">
+          <h2>Paper Portfolio</h2>
+          <p>Virtual balance ₹5,00,000</p>
+        </div>
+        <div class="portfolio-stats">
+          <div class="pstat"><div class="label">Available</div><div class="value mono" id="pAvailable">—</div></div>
+          <div class="pstat"><div class="label">P&amp;L</div><div class="value mono" id="pPnl">—</div></div>
+          <div class="pstat"><div class="label">Win Rate</div><div class="value mono" id="pWinRate">—</div></div>
+        </div>
+        <div class="positions-list">
+          <div class="sec-label">Open Positions</div>
+          <div id="openPositions"><p class="no-positions">Loading…</p></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Watchlist</h2>
+          <p>Live prices · stocks &amp; ETFs</p>
+        </div>
+        <div class="watchlist-tabs">
+          <button class="wtab active" data-tab="STOCK">Stocks</button>
+          <button class="wtab" data-tab="ETF">ETFs</button>
+        </div>
+        <div class="wl-scroll">
+          <table class="wl-table">
+            <thead><tr><th>Symbol</th><th class="num">LTP</th><th class="num">Chg%</th></tr></thead>
+            <tbody id="watchlistBody">
+              <tr><td colspan="3" style="text-align:center; color:var(--faint); padding:16px;">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </aside>
+
+    <section class="diagnostics-section">
+      <div class="diag-head">
+        <div>
+          <h2>Scan Diagnostics <span class="count" id="diagCount">(0 symbols)</span></h2>
+          <p>Every symbol from the last scan, with the exact rule pass/fail breakdown — click a row to expand.</p>
+        </div>
+        <div class="diag-filters">
+          <button class="diag-filter active" data-tier="ALL">All</button>
+          <button class="diag-filter" data-tier="INSTITUTIONAL">Institutional (6/6)</button>
+          <button class="diag-filter" data-tier="DEVELOPING">Developing (4-5/6)</button>
+          <button class="diag-filter" data-tier="WEAK">Weak (&lt;4/6)</button>
+        </div>
+      </div>
+      <div class="diag-table-wrap">
+        <table class="diag-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Tier</th>
+              <th>Rules</th>
+              <th>Pattern</th>
+            </tr>
+          </thead>
+          <tbody id="diagBody">
+            <tr><td colspan="4" style="text-align:center; color:var(--faint); padding:20px;">Run a scan to see diagnostics.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+<script>
+const API = "/api";
+let watchlistData = { STOCK: [], ETF: [] };
+let activeTab = "STOCK";
+
+// ---------------- Utilities ----------------
+function fmtMoney(n) { return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
+function fmtTime(iso) { if (!iso) return "—"; return new Date(iso).toLocaleTimeString("en-IN", { hour12: true }); }
+function showToast(msg) {
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+// ---------------- Ticker / market status ----------------
+async function loadMarketStatus() {
+  try {
+    const res = await fetch(`${API}/signals/market-status`);
+    const data = await res.json();
+    const dot = document.getElementById("marketDot");
+    dot.className = "dot " + (data.is_market_open ? "open" : "closed");
+    document.getElementById("marketStatusText").textContent =
+      data.is_market_open ? "NSE OPEN" : "NSE CLOSED";
+
+    document.getElementById("windowDot").style.opacity = data.is_signal_window ? "1" : "0.3";
+    document.getElementById("windowText").textContent = data.is_signal_window
+      ? "Inside signal window (09:15–15:15 IST)"
+      : "Outside signal window (09:15–15:15 IST)";
+
+    const pill = document.getElementById("regimePill");
+    const regime = data.market_regime || "UNKNOWN";
+    pill.textContent = "REGIME: " + regime;
+    pill.className = "pill " + (regime === "BULLISH" ? "bullish" : regime === "BEARISH" ? "bearish" : "unknown");
+  } catch (e) { /* silent — ticker just holds last known state */ }
+}
+
+function tickClock() {
+  const now = new Date().toLocaleTimeString("en-IN", { hour12: true, timeZone: "Asia/Kolkata" });
+  document.getElementById("clockText").textContent = now + " IST";
+}
+
+// ---------------- Signal feed ----------------
+function ruleLabel(rule) {
+  const map = {
+    nifty_trend_gatekeeper: "Nifty Gate", time_window: "Time Window",
+    vwap_cross_and_hold: "VWAP Hold", atr_breakout: "ATR Breakout",
+    volume_spike: "Vol Spike", rsi_momentum_reversal: "RSI Reversal",
+    sector_etf_correlation: "Sector Corr",
+  };
+  return map[rule] || rule;
+}
+
+function strengthColor(score) {
+  if (score >= 70) return "var(--emerald)";
+  if (score >= 45) return "var(--amber)";
+  return "var(--faint)";
+}
+
+function renderSignalCard(sig) {
+  const rr = ((sig.target - sig.entry_price) / (sig.entry_price - sig.stop_loss)).toFixed(2);
+  const assetBadge = sig.asset_type === "ETF" ? '<span class="badge etf">ETF</span>' : '<span class="badge stock">STOCK</span>';
+  const score = sig.strength_score ?? 0;
+  const color = strengthColor(score);
+  const isDeveloping = sig.tier === "DEVELOPING";
+  const passedCount = sig.rules_passed_count ?? sig.rules_passed.length;
+
+  const tierBadgeHtml = isDeveloping
+    ? `<span class="badge developing">DEVELOPING ${passedCount}/6</span>`
+    : `<span class="badge buy">BUY</span>`;
+
+  const el = document.createElement("div");
+  el.className = "card" + (isDeveloping ? " developing-card" : "");
+  el.innerHTML = `
+    <div class="card-top">
+      <div>
+        <div class="symbol-row">
+          <h3>${sig.symbol.replace(".NS", "")}</h3>
+          ${tierBadgeHtml}
+          ${assetBadge}
+        </div>
+        <div class="timestamp">${fmtTime(sig.generated_at)}</div>
+      </div>
+      <div class="strength-wrap">
+        <div class="strength-bar"><div class="strength-fill" style="width:${score}%;background:${color}"></div></div>
+        <span class="strength-val" style="color:${color}">${score}</span>
+      </div>
+    </div>
+    <div class="price-grid">
+      <div class="price-cell"><div class="label">Entry</div><div class="value">₹${sig.entry_price.toFixed(2)}</div></div>
+      <div class="price-cell target"><div class="label">Target</div><div class="value">₹${sig.target.toFixed(2)}</div></div>
+      <div class="price-cell sl"><div class="label">Stop Loss</div><div class="value">₹${sig.stop_loss.toFixed(2)}</div></div>
+    </div>
+    <div class="stats-row">
+      <span>ATR ${sig.atr_value.toFixed(2)}</span><span class="sep">·</span>
+      <span>R:R 1:${rr}</span><span class="sep">·</span>
+      <span>RSI ${sig.rsi_value?.toFixed(1) ?? "—"}</span><span class="sep">·</span>
+      <span>Vol ${sig.volume_ratio?.toFixed(1) ?? "—"}x</span><span class="sep">·</span>
+      <span>Sector: ${(sig.sector_proxy || "—").replace(".NS", "")}</span>
+    </div>
+    <div class="rules-tags">
+      ${sig.rules_passed.map(r => `<span class="rule-tag">✓ ${ruleLabel(r)}</span>`).join("")}
+    </div>
+    <button class="open-btn${isDeveloping ? " developing-btn" : ""}">
+      ${isDeveloping ? "Open Paper Position (Developing)" : "Open Paper Position"}
+    </button>
+  `;
+  const btn = el.querySelector(".open-btn");
+  if (isDeveloping) {
+    btn.addEventListener("click", () => openCandidatePosition(sig, btn));
+  } else {
+    btn.addEventListener("click", () => openPosition(sig.id, btn));
+  }
+  return el;
+}
+
+function renderSignals(signals, developingSignals) {
+  const grid = document.getElementById("signalGrid");
+  const total = signals.length + (developingSignals?.length || 0);
+  document.getElementById("signalCount").textContent =
+    `(${signals.length} institutional${developingSignals?.length ? `, ${developingSignals.length} developing` : ""})`;
+  grid.innerHTML = "";
+
+  if (total === 0) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <p class="title">No qualifying or developing signals right now.</p>
+        <p class="sub">All 6 rules must align for a full signal — the scanner keeps checking every few minutes during market hours. Check Scan Diagnostics below to see how close each symbol got.</p>
+      </div>`;
+    return;
+  }
+  signals.forEach(sig => grid.appendChild(renderSignalCard(sig)));
+  (developingSignals || []).forEach(sig => grid.appendChild(renderSignalCard(sig)));
+}
+
+async function loadSignals() {
+  try {
+    const res = await fetch(`${API}/signals/`);
+    const data = await res.json();
+    renderSignals(data.signals, data.developing_signals);
+    document.getElementById("lastScanText").textContent = "Last scan: " + fmtTime(data.scan_timestamp);
+  } catch (e) {
+    showToast("Couldn't load signals — will retry automatically.");
+  }
+}
+
+// ---------------- Diagnostics ----------------
+let diagData = [];
+let activeDiagFilter = "ALL";
+
+function tierBadge(tier) {
+  const labels = { INSTITUTIONAL: "6/6 Institutional", DEVELOPING: "Developing", WEAK: "Weak", NO_DATA: "No Data" };
+  return `<span class="tier-badge ${tier.toLowerCase()}">${labels[tier] || tier}</span>`;
+}
+
+function renderDiagnostics() {
+  const tbody = document.getElementById("diagBody");
+  const filtered = activeDiagFilter === "ALL" ? diagData : diagData.filter(d => d.tier === activeDiagFilter);
+  document.getElementById("diagCount").textContent = `(${filtered.length} symbols)`;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--faint); padding:20px;">No symbols match this filter.</td></tr>`;
+    return;
+  }
+
+  // Sort by rules_passed_count descending so near-misses surface first
+  const sorted = [...filtered].sort((a, b) => b.rules_passed_count - a.rules_passed_count);
+
+  tbody.innerHTML = sorted.map((d, i) => {
+    const dots = d.rules.map(r => `<div class="rule-dot ${r.passed ? "pass" : "fail"}" title="${r.label}: ${r.passed ? "PASS" : "FAIL"}"></div>`).join("");
+    const detailLines = d.rules.map(r => `
+      <div class="detail-rule-line">
+        <span class="rl-status ${r.passed ? "pass" : "fail"}">${r.passed ? "PASS" : "FAIL"}</span>
+        <span class="rl-label">${r.label}</span>
+        <span class="rl-detail">${r.detail}</span>
+      </div>
+    `).join("") + (!d.in_time_window ? `
+      <div class="detail-rule-line">
+        <span class="rl-status fail">NOTE</span>
+        <span class="rl-label">Time Window</span>
+        <span class="rl-detail">${d.time_window_detail}</span>
+      </div>` : "");
+
+    return `
+      <tr class="diag-row" data-row="${i}">
+        <td class="sym">${d.symbol.replace(".NS", "")} <span style="color:var(--faint); font-size:10px;">${d.asset_type}</span></td>
+        <td>${tierBadge(d.tier)}</td>
+        <td class="mono" style="color:var(--muted);">${d.rules_passed_count}/${d.total_rules}</td>
+        <td><div class="rule-dots">${dots}</div></td>
+      </tr>
+      <tr class="diag-detail-row hidden" data-detail="${i}">
+        <td colspan="4">${detailLines}</td>
+      </tr>
+    `;
+  }).join("");
+
+  tbody.querySelectorAll(".diag-row").forEach(row => {
+    row.addEventListener("click", () => {
+      const detail = tbody.querySelector(`[data-detail="${row.dataset.row}"]`);
+      detail.classList.toggle("hidden");
+    });
+  });
+}
+
+async function loadDiagnostics() {
+  try {
+    const res = await fetch(`${API}/signals/diagnostics`);
+    const data = await res.json();
+    diagData = data.diagnostics || [];
+    renderDiagnostics();
+  } catch (e) {
+    showToast("Couldn't load scan diagnostics.");
+  }
+}
+
+document.querySelectorAll(".diag-filter").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".diag-filter").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    activeDiagFilter = btn.dataset.tier;
+    renderDiagnostics();
+  });
+});
+
+async function scanNow() {
+  const btn = document.getElementById("scanBtn");
+  btn.disabled = true; btn.textContent = "Scanning…";
+  try {
+    const res = await fetch(`${API}/signals/scan-now`, { method: "POST" });
+    const data = await res.json();
+    renderSignals(data.signals, data.developing_signals);
+    document.getElementById("lastScanText").textContent = "Last scan: " + fmtTime(data.scan_timestamp);
+    await loadDiagnostics(); // diagnostics reflect the scan that just ran
+  } catch (e) {
+    showToast("Scan failed — check the server logs.");
+  } finally {
+    btn.disabled = false; btn.textContent = "Scan Now";
+  }
+}
+
+// ---------------- Portfolio ----------------
+async function loadPortfolio() {
+  try {
+    const res = await fetch(`${API}/portfolio/`);
+    const p = await res.json();
+    document.getElementById("pAvailable").textContent = fmtMoney(p.available_capital);
+    const pnlEl = document.getElementById("pPnl");
+    pnlEl.textContent = (p.total_realized_pnl >= 0 ? "+" : "") + fmtMoney(p.total_realized_pnl);
+    pnlEl.className = "value mono " + (p.total_realized_pnl >= 0 ? "pos" : "neg");
+    document.getElementById("pWinRate").textContent = p.win_rate_pct + "%";
+
+    const list = document.getElementById("openPositions");
+    if (p.open_positions.length === 0) {
+      list.innerHTML = `<p class="no-positions">No open positions.</p>`;
+    } else {
+      list.innerHTML = p.open_positions.map(pos => `
+        <div class="position-row">
+          <div>
+            <div class="pname">${pos.symbol.replace(".NS", "")}</div>
+            <div class="pmeta">${pos.quantity} @ ₹${pos.entry_price.toFixed(2)}</div>
+          </div>
+          <button class="close-link" data-id="${pos.id}" data-symbol="${pos.symbol}" data-entry="${pos.entry_price}">Close</button>
+        </div>
+      `).join("");
+      list.querySelectorAll(".close-link").forEach(btn => {
+        btn.addEventListener("click", () => closePosition(btn.dataset.id, btn.dataset.symbol, parseFloat(btn.dataset.entry)));
+      });
+    }
+  } catch (e) {
+    showToast("Couldn't load portfolio.");
+  }
+}
+
+async function openPosition(signalId, btnEl) {
+  btnEl.disabled = true; btnEl.textContent = "Opening…";
+  try {
+    const res = await fetch(`${API}/portfolio/positions/open`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signal_id: signalId }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Could not open position");
+    }
+    showToast("Position opened.");
+    await loadPortfolio();
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    btnEl.disabled = false; btnEl.textContent = "Open Paper Position";
+  }
+}
+
+async function openCandidatePosition(sig, btnEl) {
+  // Developing-tier (4-5/6) cards aren't persisted by the scanner — unlike
+  // openPosition() above, there's no existing signal_id to reference yet.
+  // This sends the full computed payload; the backend persists it as a
+  // signal_history row (tier=DEVELOPING) and opens the position in one step.
+  btnEl.disabled = true; btnEl.textContent = "Opening…";
+  try {
+    const payload = {
+      symbol: sig.symbol,
+      asset_type: sig.asset_type,
+      signal_type: sig.signal_type,
+      entry_price: sig.entry_price,
+      stop_loss: sig.stop_loss,
+      target: sig.target,
+      atr_value: sig.atr_value,
+      rsi_value: sig.rsi_value,
+      vwap_value: sig.vwap_value,
+      volume_ratio: sig.volume_ratio,
+      rules_passed: sig.rules_passed,
+      sector_proxy: sig.sector_proxy,
+      market_regime: sig.market_regime,
+      strength_score: sig.strength_score,
+      tier: "DEVELOPING",
+    };
+    const res = await fetch(`${API}/portfolio/positions/open-candidate`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Could not open position");
+    }
+    showToast("Developing-tier position opened.");
+    await loadPortfolio();
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    btnEl.disabled = false; btnEl.textContent = "Open Paper Position (Developing)";
+  }
+}
+
+async function closePosition(positionId, symbol, fallbackPrice) {
+  try {
+    const row = [...watchlistData.STOCK, ...watchlistData.ETF].find(p => p.symbol === symbol);
+    const exitPrice = row ? row.last_price : fallbackPrice;
+    const res = await fetch(`${API}/portfolio/positions/${positionId}/close?exit_price=${exitPrice}`, { method: "POST" });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Could not close position");
+    }
+    showToast("Position closed.");
+    await loadPortfolio();
+  } catch (e) {
+    showToast(e.message);
+  }
+}
+
+// ---------------- Watchlist ----------------
+function renderWatchlist() {
+  const rows = watchlistData[activeTab] || [];
+  const tbody = document.getElementById("watchlistBody");
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:var(--faint); padding:16px;">Waiting for prices…</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(p => {
+    const up = p.change_pct >= 0;
+    return `<tr>
+      <td>${p.symbol.replace(".NS", "")}</td>
+      <td class="num">₹${p.last_price.toFixed(2)}</td>
+      <td class="num chg ${up ? "up" : "down"}">${up ? "+" : ""}${p.change_pct.toFixed(2)}%</td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadPrices() {
+  try {
+    const res = await fetch(`${API}/prices/`);
+    const data = await res.json();
+    watchlistData.STOCK = data.prices.filter(p => p.asset_type === "STOCK");
+    watchlistData.ETF = data.prices.filter(p => p.asset_type === "ETF");
+    renderWatchlist();
+  } catch (e) { /* ticker stays stale until next tick */ }
+}
+
+document.querySelectorAll(".wtab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".wtab").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    activeTab = tab.dataset.tab;
+    renderWatchlist();
+  });
+});
+
+// ---------------- WebSocket live push ----------------
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}${API}/signals/ws`);
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === "new_signal") {
+      loadSignals(); // simplest correct approach — re-pull the full current list
+      loadDiagnostics();
+      showToast(`New signal: ${msg.data.symbol.replace(".NS", "")}`);
+    }
+  };
+  ws.onclose = () => setTimeout(connectWS, 4000); // auto-reconnect
+}
+
+// ---------------- Wiring ----------------
+document.getElementById("scanBtn").addEventListener("click", scanNow);
+document.getElementById("refreshBtn").addEventListener("click", () => {
+  loadMarketStatus(); loadSignals(); loadPrices(); loadPortfolio(); loadDiagnostics();
+});
+
+tickClock();
+setInterval(tickClock, 1000);
+loadMarketStatus();
+loadSignals();
+loadPrices();
+loadPortfolio();
+loadDiagnostics();
+connectWS();
+
+setInterval(loadMarketStatus, 15000);
+setInterval(loadPrices, 30000);
+setInterval(loadSignals, 60000);
+setInterval(loadDiagnostics, 60000);
+</script>
+</body>
+</html>
