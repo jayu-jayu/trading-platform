@@ -10,9 +10,13 @@ jobs:
     strategy:
       matrix:
         python: [3.11]
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set Python path
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
 
       - name: Set up Python
         uses: actions/setup-python@v4
