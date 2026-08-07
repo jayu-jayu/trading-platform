@@ -18,6 +18,9 @@ jobs:
       - name: Set Python path
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
 
+      - name: Set DATABASE_URL for unit tests
+        run: echo "DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres" >> $GITHUB_ENV
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
