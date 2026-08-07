@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: nse-signal-platform
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nse-signal-platform-db
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: SCAN_INTERVAL_MINUTES
+        value: "5"
+      - key: DEFAULT_VIRTUAL_CAPITAL
+        value: "500000"
+
+databases:
+  - name: nse-signal-platform-db
+    plan: free
+    databaseName: nse_platform
+    user: nse_user
