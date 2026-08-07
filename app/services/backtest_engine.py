@@ -84,9 +84,18 @@ async def _simulate_exit(symbol: str, interval: str, entry_time: datetime,
     future_candles = _localize(future_candles)
 
     for c in future_candles:
-        if c.high >= target:
+        # Conservative intrabar handling for LONG/BUY trades:
+        # - If both target and stop are touched within the same OHLC candle,
+        #   assume the STOP LOSS was hit first (conservative outcome).
+        # - Otherwise resolve to whichever level was touched on this candle.
+        touched_target = c.high >= target
+        touched_sl = c.low <= stop_loss
+
+        if touched_target and touched_sl:
+            return {"exit_time": c.candle_timestamp, "exit_price": stop_loss, "exit_reason": "SL_HIT"}
+        if touched_target:
             return {"exit_time": c.candle_timestamp, "exit_price": target, "exit_reason": "TARGET_HIT"}
-        if c.low <= stop_loss:
+        if touched_sl:
             return {"exit_time": c.candle_timestamp, "exit_price": stop_loss, "exit_reason": "SL_HIT"}
 
     if future_candles:
