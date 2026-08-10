@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.services.data_fetcher import fetch_full_scan_data
 from app.services.signal_engine import evaluate_symbol, get_market_regime, check_time_window, is_market_open
+from app.services.market_analysis import classify_market_regime
+from app.services.indicators import chart_result_to_df, add_indicators
 from app.core.websocket_manager import manager as ws_manager
 from app.models.signal import SignalHistory
 from app.db.session import AsyncSessionLocal
@@ -60,6 +62,16 @@ async def run_full_scan() -> dict:
     batch = await fetch_full_scan_data(all_symbols, settings.NIFTY_INDEX_SYMBOL)
     market_regime = get_market_regime(batch["nifty"])
 
+    # Phase 2: richer regime classification (TRENDING_UP/DOWN, SIDEWAYS,
+    # HIGH_VOLATILITY), computed once from the SAME Nifty data already
+    # fetched for the existing binary gatekeeper above. This is diagnostic
+    # enrichment only — market_regime (BULLISH/BEARISH) above still
+    # governs the actual gate, completely unchanged.
+    nifty_df = chart_result_to_df(batch["nifty"].get("raw") if batch["nifty"] else None)
+    market_regime_detail = None
+    if nifty_df is not None and len(nifty_df) >= 30:
+        market_regime_detail = classify_market_regime(add_indicators(nifty_df))
+
     # Every symbol is evaluated regardless of market regime — this is what
     # gives you visibility into "these 3 would qualify if only the market
     # gate were open" instead of an opaque empty scan.
@@ -68,11 +80,13 @@ async def run_full_scan() -> dict:
         eval_tasks.append(evaluate_symbol(
             symbol=sym, asset_type="STOCK", df_15m_raw=batch["15m"].get(sym),
             market_regime=market_regime, sector_15m_raw=_lookup_sector_raw(sym, batch["15m"]),
+            market_regime_detail=market_regime_detail,
         ))
     for sym in etfs:
         eval_tasks.append(evaluate_symbol(
             symbol=sym, asset_type="ETF", df_15m_raw=batch["15m"].get(sym),
             market_regime=market_regime, sector_15m_raw=_lookup_sector_raw(sym, batch["15m"]),
+            market_regime_detail=market_regime_detail,
         ))
 
     diagnostics = await asyncio.gather(*eval_tasks)
@@ -102,6 +116,7 @@ async def run_full_scan() -> dict:
     _latest_diagnostics_cache = {
         "scan_timestamp": scan_result["scan_timestamp"],
         "market_regime": market_regime,
+        "market_regime_detail": market_regime_detail,
         "diagnostics": [d.to_dict() for d in diagnostics],
     }
     return scan_result
@@ -133,6 +148,12 @@ async def _persist_signals(signals: list[dict]) -> list[dict]:
                 market_regime=sig["market_regime"],
                 strength_score=sig["strength_score"],
                 tier=sig.get("tier", "INSTITUTIONAL"),
+                trend_score=sig.get("trend_score"),
+                volume_score=sig.get("volume_score"),
+                momentum_score=sig.get("momentum_score"),
+                vwap_score=sig.get("vwap_score"),
+                market_score=sig.get("market_score"),
+                market_regime_detail=sig.get("market_regime_detail"),
             )
             session.add(record)
             records.append(record)

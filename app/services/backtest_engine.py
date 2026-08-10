@@ -23,6 +23,8 @@ import pytz
 from app.config import settings
 from app.services.price_cache import get_cached_candles
 from app.services.signal_engine import evaluate_symbol, get_market_regime
+from app.services.market_analysis import classify_market_regime
+from app.services.indicators import chart_result_to_df, add_indicators
 from app.services.sector_map import get_sector_proxy
 from app.models.backtest import BacktestRun, BacktestTrade
 from app.db.session import AsyncSessionLocal
@@ -155,12 +157,23 @@ async def run_backtest(symbols: list[str], start_date: datetime, end_date: datet
                     continue
 
                 market_regime = get_market_regime({"raw": _candles_to_raw(nifty_window)["raw"]})
+
+                # Phase 2: same richer regime classification scanner.py computes
+                # for live scans, from the same truncated Nifty window — keeps
+                # backtested confidence scores consistent with live ones instead
+                # of silently falling back to a neutral default.
+                nifty_window_df = chart_result_to_df(_candles_to_raw(nifty_window)["raw"])
+                market_regime_detail = None
+                if nifty_window_df is not None and len(nifty_window_df) >= 30:
+                    market_regime_detail = classify_market_regime(add_indicators(nifty_window_df))
+
                 df_raw = _candles_to_raw(window)
                 sector_raw = _candles_to_raw(sector_window) if sector_window else None
 
                 diag = await evaluate_symbol(
                     symbol=symbol, asset_type=asset_type, df_15m_raw=df_raw,
                     market_regime=market_regime, sector_15m_raw=sector_raw, as_of=as_of,
+                    market_regime_detail=market_regime_detail,
                 )
 
                 signal = diag.qualified_signal or diag.developing_signal

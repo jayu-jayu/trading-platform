@@ -25,6 +25,15 @@ class SignalResponse(BaseModel):
     tier: str = "INSTITUTIONAL"
     rules_passed_count: int = 6
 
+    # Phase 2 additions — all optional with safe defaults, so any existing
+    # code constructing a SignalResponse without them still works.
+    trend_score: float | None = None
+    volume_score: float | None = None
+    momentum_score: float | None = None
+    vwap_score: float | None = None
+    market_score: float | None = None
+    market_regime_detail: str | None = None
+
 
 class SignalListResponse(BaseModel):
     scan_timestamp: datetime | None

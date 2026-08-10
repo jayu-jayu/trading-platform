@@ -178,6 +178,18 @@
   .stats-row span.sep { color: var(--hairline); }
 
   .rules-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+
+  .confidence-breakdown {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+    margin-bottom: 12px; padding: 8px; background: var(--surface2); border-radius: 8px;
+  }
+  .cb-item { text-align: center; }
+  .cb-item .cb-label { font-size: 8.5px; text-transform: uppercase; color: var(--faint); letter-spacing: 0.03em; }
+  .cb-item .cb-value { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink); margin-top: 2px; }
+  .pill.regime-trending-up { background: rgba(52,211,153,0.14); color: var(--emerald); border: 1px solid var(--emerald-dim); }
+  .pill.regime-trending-down { background: rgba(251,113,133,0.14); color: var(--rose); border: 1px solid var(--rose-dim); }
+  .pill.regime-sideways { background: rgba(147,161,184,0.1); color: var(--muted); border: 1px solid var(--hairline); }
+  .pill.regime-high-volatility { background: rgba(251,191,36,0.14); color: var(--amber); border: 1px solid var(--amber-dim); }
   .rule-tag {
     font-size: 9.5px; font-family: 'IBM Plex Mono', monospace;
     padding: 2px 7px; border-radius: 5px; background: var(--surface2);
@@ -317,6 +329,7 @@
     <div class="ticker-item"><span class="dot" id="marketDot"></span><span id="marketStatusText">Checking market status…</span></div>
     <div class="ticker-item"><span class="dot window" id="windowDot" style="opacity:0.3"></span><span id="windowText">Signal window 09:15–15:15 IST</span></div>
     <div class="ticker-item"><span class="pill unknown" id="regimePill">REGIME: —</span></div>
+    <div class="ticker-item"><span class="pill unknown" id="regimeDetailPill" style="display:none;">—</span></div>
     <div class="ticker-item mono" id="clockText">--:--:--</div>
     <div class="ticker-item mono" id="lastScanText" style="margin-left:auto;">Last scan: —</div>
   </div>
@@ -481,6 +494,23 @@ function strengthColor(score) {
   return "var(--faint)";
 }
 
+function renderConfidenceBreakdown(sig) {
+  // Gracefully omits itself if this signal predates Phase 2 (e.g. an old
+  // row in signal_history from before these columns existed) — all five
+  // fields must be present, not just some, to avoid a misleading partial grid.
+  const fields = [
+    ["Trend", sig.trend_score, 30], ["Volume", sig.volume_score, 20],
+    ["Momentum", sig.momentum_score, 20], ["VWAP", sig.vwap_score, 15],
+    ["Market", sig.market_score, 15],
+  ];
+  if (fields.some(([, val]) => val === null || val === undefined)) return "";
+
+  const items = fields.map(([label, val, max]) =>
+    `<div class="cb-item"><div class="cb-label">${label}</div><div class="cb-value">${val.toFixed(1)}/${max}</div></div>`
+  ).join("");
+  return `<div class="confidence-breakdown">${items}</div>`;
+}
+
 function renderSignalCard(sig) {
   const rr = ((sig.target - sig.entry_price) / (sig.entry_price - sig.stop_loss)).toFixed(2);
   const assetBadge = sig.asset_type === "ETF" ? '<span class="badge etf">ETF</span>' : '<span class="badge stock">STOCK</span>';
@@ -515,6 +545,7 @@ function renderSignalCard(sig) {
       <div class="price-cell target"><div class="label">Target</div><div class="value">₹${sig.target.toFixed(2)}</div></div>
       <div class="price-cell sl"><div class="label">Stop Loss</div><div class="value">₹${sig.stop_loss.toFixed(2)}</div></div>
     </div>
+    ${renderConfidenceBreakdown(sig)}
     <div class="stats-row">
       <span>ATR ${sig.atr_value.toFixed(2)}</span><span class="sep">·</span>
       <span>R:R 1:${rr}</span><span class="sep">·</span>
@@ -603,6 +634,16 @@ function renderDiagnostics() {
         <span class="rl-status fail">NOTE</span>
         <span class="rl-label">Time Window</span>
         <span class="rl-detail">${d.time_window_detail}</span>
+      </div>` : "") + (d.pivot_description ? `
+      <div class="detail-rule-line">
+        <span class="rl-status" style="color:var(--cyan);">INFO</span>
+        <span class="rl-label">Pivot Position</span>
+        <span class="rl-detail">${d.pivot_description}</span>
+      </div>` : "") + (d.confidence_breakdown ? `
+      <div class="detail-rule-line">
+        <span class="rl-status" style="color:var(--cyan);">INFO</span>
+        <span class="rl-label">Confidence</span>
+        <span class="rl-detail">${d.confidence_breakdown.confidence_pct}% — Trend ${d.confidence_breakdown.breakdown.trend}/30, Volume ${d.confidence_breakdown.breakdown.volume}/20, Momentum ${d.confidence_breakdown.breakdown.momentum}/20, VWAP ${d.confidence_breakdown.breakdown.vwap}/15, Market ${d.confidence_breakdown.breakdown.market}/15</span>
       </div>` : "");
 
     return `
@@ -632,9 +673,27 @@ async function loadDiagnostics() {
     const data = await res.json();
     diagData = data.diagnostics || [];
     renderDiagnostics();
+    updateRegimeDetailPill(data.market_regime_detail);
   } catch (e) {
     showToast("Couldn't load scan diagnostics.");
   }
+}
+
+function updateRegimeDetailPill(detail) {
+  const pill = document.getElementById("regimeDetailPill");
+  if (!detail || !detail.regime || detail.regime === "UNKNOWN") {
+    pill.style.display = "none";
+    return;
+  }
+  const labels = {
+    TRENDING_UP: "TRENDING UP", TRENDING_DOWN: "TRENDING DOWN",
+    SIDEWAYS: "SIDEWAYS", HIGH_VOLATILITY: "HIGH VOLATILITY",
+  };
+  const cssClass = "regime-" + detail.regime.toLowerCase().replace(/_/g, "-");
+  pill.className = "pill " + cssClass;
+  pill.textContent = labels[detail.regime] || detail.regime;
+  pill.style.display = "inline-block";
+  pill.title = detail.detail || "";
 }
 
 document.querySelectorAll(".diag-filter").forEach(btn => {

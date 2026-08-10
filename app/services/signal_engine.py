@@ -34,6 +34,8 @@ import pytz
 
 from app.services.indicators import chart_result_to_df, add_indicators, compute_atr_targets
 from app.services.sector_map import get_sector_proxy
+from app.services.market_analysis import compute_pivot_levels, describe_price_vs_pivots
+from app.services.confidence_engine import compute_confidence
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -77,6 +79,12 @@ class SymbolDiagnostics:
     qualified_signal: dict | None = None  # populated only when tier == INSTITUTIONAL and in_time_window
     developing_signal: dict | None = None  # populated when tier == DEVELOPING and in_time_window
 
+    # Phase 2 additions — all diagnostic-only, never gate qualification or tier.
+    market_regime_detail: dict | None = None  # TRENDING_UP/DOWN, SIDEWAYS, HIGH_VOLATILITY (see market_analysis.py)
+    pivot_levels: dict | None = None
+    pivot_description: str = ""
+    confidence_breakdown: dict | None = None  # {trend, volume, momentum, vwap, market} — see confidence_engine.py
+
     def to_dict(self) -> dict:
         return {
             "symbol": self.symbol,
@@ -91,6 +99,10 @@ class SymbolDiagnostics:
                 {"rule_id": r.rule_id, "label": r.label, "passed": r.passed, "detail": r.detail}
                 for r in self.rule_results
             ],
+            "market_regime_detail": self.market_regime_detail,
+            "pivot_levels": self.pivot_levels,
+            "pivot_description": self.pivot_description,
+            "confidence_breakdown": self.confidence_breakdown,
         }
 
 
@@ -220,14 +232,6 @@ def _check_sector_correlation(symbol: str, sector_15m_raw: dict | None) -> tuple
     return False, f"Sector proxy {sector_proxy} is BELOW its 15m 20-EMA — this looks like an isolated single-stock move.", sector_proxy
 
 
-def _strength_score(volume_ratio: float, rsi: float, breakout_margin_atr: float) -> int:
-    base = 40
-    volume_bonus = min(int((volume_ratio - VOLUME_SPIKE_MULTIPLE) * 15), 20)
-    rsi_bonus = min(int(rsi - RSI_REVERSAL_THRESHOLD), 15) if rsi else 0
-    breakout_bonus = min(int(breakout_margin_atr * 20), 25)
-    return max(0, min(100, base + volume_bonus + rsi_bonus + breakout_bonus))
-
-
 def _tier_for_count(count: int) -> str:
     if count >= INSTITUTIONAL_THRESHOLD:
         return "INSTITUTIONAL"
@@ -238,7 +242,8 @@ def _tier_for_count(count: int) -> str:
 
 async def evaluate_symbol(symbol: str, asset_type: str, df_15m_raw: dict | None,
                            market_regime: str, sector_15m_raw: dict | None,
-                           as_of: datetime | None = None) -> SymbolDiagnostics:
+                           as_of: datetime | None = None,
+                           market_regime_detail: dict | None = None) -> SymbolDiagnostics:
     """
     Runs ALL 6 rules for one symbol and returns a full diagnostic breakdown
     — every rule's pass/fail and the exact numbers involved — regardless of
@@ -252,6 +257,15 @@ async def evaluate_symbol(symbol: str, asset_type: str, df_15m_raw: dict | None,
     path, which is what makes reusing this exact function for backtesting
     safe: every other check operates purely on the `df_15m_raw` /
     `sector_15m_raw` data handed to it, never on the wall clock.
+
+    `market_regime_detail`: OPTIONAL (Phase 2). The richer regime
+    classification (TRENDING_UP/DOWN, SIDEWAYS, HIGH_VOLATILITY) from
+    market_analysis.py, computed once per scan from Nifty data — same
+    market-wide scope as `market_regime` itself, just a finer-grained
+    read. Omitting this parameter is fully safe: it only feeds the
+    diagnostic confidence breakdown's Market sub-score, never any of the
+    6 gating rules, so existing callers that don't pass it are unaffected
+    apart from that one diagnostic field falling back to a neutral default.
     """
     diag = SymbolDiagnostics(symbol=symbol, asset_type=asset_type, data_available=True)
 
@@ -300,13 +314,59 @@ async def evaluate_symbol(symbol: str, asset_type: str, df_15m_raw: dict | None,
              "but no new trade signal will be issued until the window reopens."
     )
 
+    # --- Phase 2: diagnostic-only additions, computed for EVERY symbol
+    # regardless of tier — none of this can change rules_passed_count,
+    # tier, or qualification. Wrapped defensively so a Phase 2 computation
+    # issue can never take down the core (already-proven) rule evaluation
+    # above it.
+    diag.market_regime_detail = market_regime_detail
+    try:
+        pivots = compute_pivot_levels(df, as_of=effective_time)
+        diag.pivot_levels = pivots
+        diag.pivot_description = describe_price_vs_pivots(float(last["close"]), pivots)
+    except Exception as exc:
+        diag.pivot_description = f"Pivot calculation unavailable: {exc}"
+
+    atr_for_breakout = float(last["atr14"]) if not pd.isna(last["atr14"]) else None
+    breakout_margin_atr_diag = (
+        (float(last["close"]) - last["rolling_high_20"]) / atr_for_breakout
+        if atr_for_breakout and not pd.isna(last["rolling_high_20"]) else 0.0
+    )
+    try:
+        diag.confidence_breakdown = compute_confidence(
+            breakout_margin_atr=breakout_margin_atr_diag,
+            volume_ratio=volume_ratio,
+            rsi_value=float(last["rsi14"]) if not pd.isna(last["rsi14"]) else None,
+            vwap_passed=vwap_passed,
+            close=float(last["close"]),
+            vwap_value=float(last["vwap"]) if not pd.isna(last["vwap"]) else None,
+            market_regime_detail=market_regime_detail,
+        )
+    except Exception as exc:
+        diag.confidence_breakdown = None
+        diag.pivot_description = diag.pivot_description or f"Confidence scoring unavailable: {exc}"
+    # --- end Phase 2 additions ---
+
     if diag.tier in ("INSTITUTIONAL", "DEVELOPING") and diag.in_time_window:
         entry_price = float(last["close"])
         atr_value = float(last["atr14"]) if not pd.isna(last["atr14"]) else None
         if atr_value and atr_value > 0:
             stop_loss, target = compute_atr_targets(entry_price, atr_value, ATR_SL_MULTIPLE, ATR_TARGET_MULTIPLE)
-            breakout_margin_atr = (entry_price - last["rolling_high_20"]) / atr_value
-            strength = _strength_score(volume_ratio, float(last["rsi14"]), breakout_margin_atr)
+
+            # strength_score keeps its original name and 0-100 range for
+            # backward compatibility with everything that already reads it
+            # (dashboard cards, sort order, the DB column) — the VALUE now
+            # comes from the Phase 2 weighted confidence matrix instead of
+            # the old flat heuristic, rather than maintaining two scores.
+            confidence = diag.confidence_breakdown or compute_confidence(
+                breakout_margin_atr=breakout_margin_atr_diag, volume_ratio=volume_ratio,
+                rsi_value=float(last["rsi14"]) if not pd.isna(last["rsi14"]) else None,
+                vwap_passed=vwap_passed, close=entry_price,
+                vwap_value=float(last["vwap"]) if not pd.isna(last["vwap"]) else None,
+                market_regime_detail=market_regime_detail,
+            )
+            strength = confidence["confidence_pct"]
+            breakdown = confidence["breakdown"]
 
             signal_payload = {
                 "symbol": symbol,
@@ -325,6 +385,14 @@ async def evaluate_symbol(symbol: str, asset_type: str, df_15m_raw: dict | None,
                 "strength_score": strength,
                 "tier": diag.tier,
                 "rules_passed_count": diag.rules_passed_count,
+                # Phase 2 additions to the payload — new keys only, nothing
+                # existing removed or renamed.
+                "trend_score": breakdown["trend"],
+                "volume_score": breakdown["volume"],
+                "momentum_score": breakdown["momentum"],
+                "vwap_score": breakdown["vwap"],
+                "market_score": breakdown["market"],
+                "market_regime_detail": (market_regime_detail or {}).get("regime"),
             }
 
             if diag.tier == "INSTITUTIONAL":

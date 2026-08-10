@@ -20,8 +20,16 @@ class SymbolDiagnostic(BaseModel):
     time_window_detail: str
     rules: list[RuleDiagnostic]
 
+    # Phase 2 additions — all optional, so a diagnostics dict built before
+    # these fields existed still validates fine.
+    market_regime_detail: dict | None = None
+    pivot_levels: dict | None = None
+    pivot_description: str | None = None
+    confidence_breakdown: dict | None = None
+
 
 class DiagnosticsResponse(BaseModel):
     scan_timestamp: datetime | None
     market_regime: str
+    market_regime_detail: dict | None = None
     diagnostics: list[SymbolDiagnostic]
