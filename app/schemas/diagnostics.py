@@ -27,6 +27,11 @@ class SymbolDiagnostic(BaseModel):
     pivot_description: str | None = None
     confidence_breakdown: dict | None = None
 
+    # Phase 3 additions — all optional
+    relative_strength: dict | None = None
+    sector_relative_strength: dict | None = None
+    mtf_confirmation: dict | None = None
+
 
 class DiagnosticsResponse(BaseModel):
     scan_timestamp: datetime | None

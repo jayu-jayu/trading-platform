@@ -56,3 +56,20 @@ async def fetch_full_scan_data(symbols: list[str], nifty_symbol: str) -> dict:
         "nifty": nifty_raw,
         "15m": {r["symbol"]: r for r in s15_results},
     }
+
+
+async def fetch_5m_batch(symbols: list[str]) -> dict[str, dict]:
+    """
+    Phase 3: targeted 5-minute fetch for MTF confirmation. Deliberately
+    NOT part of fetch_full_scan_data — scanner.py only calls this for the
+    small subset of symbols that already pass 4+ of the 6 core 15m rules,
+    not the full watchlist, to avoid roughly doubling request volume every
+    scan for a diagnostic-only feature. rng="1d" since 5m data is high-
+    resolution and recent-session context is all this needs.
+    """
+    if not symbols:
+        return {}
+    async with httpx.AsyncClient() as client:
+        tasks = [_fetch_one(client, s, "5m", "1d") for s in symbols]
+        results = await asyncio.gather(*tasks)
+    return {r["symbol"]: r for r in results}

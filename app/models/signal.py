@@ -46,4 +46,8 @@ class SignalHistory(Base):
     market_score: Mapped[float] = mapped_column(Float, nullable=True)
     market_regime_detail: Mapped[str] = mapped_column(String(20), nullable=True)  # TRENDING_UP/DOWN, SIDEWAYS, HIGH_VOLATILITY
 
+    # Phase 3 additions — nullable, no default required.
+    mtf_confirmed: Mapped[bool] = mapped_column(nullable=True)  # 15m trend + 5m setup confirmation
+    sector_relative_strength_pct: Mapped[float] = mapped_column(Float, nullable=True)
+
     generated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

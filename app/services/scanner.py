@@ -11,10 +11,14 @@ import pytz
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.services.data_fetcher import fetch_full_scan_data
-from app.services.signal_engine import evaluate_symbol, get_market_regime, check_time_window, is_market_open
+from app.services.data_fetcher import fetch_full_scan_data, fetch_5m_batch
+from app.services.signal_engine import (
+    evaluate_symbol, get_market_regime, check_time_window, is_market_open, DEVELOPING_THRESHOLD,
+)
 from app.services.market_analysis import classify_market_regime
+from app.services.mtf_engine import check_mtf_confirmation
 from app.services.indicators import chart_result_to_df, add_indicators
+from app.services.sector_map import get_sector_proxy
 from app.core.websocket_manager import manager as ws_manager
 from app.models.signal import SignalHistory
 from app.db.session import AsyncSessionLocal
@@ -80,16 +84,43 @@ async def run_full_scan() -> dict:
         eval_tasks.append(evaluate_symbol(
             symbol=sym, asset_type="STOCK", df_15m_raw=batch["15m"].get(sym),
             market_regime=market_regime, sector_15m_raw=_lookup_sector_raw(sym, batch["15m"]),
-            market_regime_detail=market_regime_detail,
+            market_regime_detail=market_regime_detail, nifty_15m_raw=batch["nifty"],
         ))
     for sym in etfs:
         eval_tasks.append(evaluate_symbol(
             symbol=sym, asset_type="ETF", df_15m_raw=batch["15m"].get(sym),
             market_regime=market_regime, sector_15m_raw=_lookup_sector_raw(sym, batch["15m"]),
-            market_regime_detail=market_regime_detail,
+            market_regime_detail=market_regime_detail, nifty_15m_raw=batch["nifty"],
         ))
 
     diagnostics = await asyncio.gather(*eval_tasks)
+
+    # Phase 3, pass 2: MTF confirmation. Only fetch 5m data for symbols
+    # that already pass 4+ of the 6 core 15m rules — see mtf_engine.py and
+    # data_fetcher.fetch_5m_batch for why this is deliberately targeted
+    # rather than run against the whole watchlist every scan.
+    eligible_symbols = [d.symbol for d in diagnostics if d.rules_passed_count >= DEVELOPING_THRESHOLD]
+    if eligible_symbols:
+        batch_5m = await fetch_5m_batch(eligible_symbols)
+        for diag in diagnostics:
+            if diag.symbol not in batch_5m:
+                continue
+            raw_15m = batch["15m"].get(diag.symbol)
+            df_15m = chart_result_to_df(raw_15m.get("raw") if raw_15m else None)
+            if df_15m is None or len(df_15m) < 50:
+                continue
+            df_15m = add_indicators(df_15m)
+            mtf_result = check_mtf_confirmation(df_15m, batch_5m.get(diag.symbol))
+            diag.mtf_confirmation = mtf_result
+
+            # Mirror onto the signal payload too, if this symbol qualified —
+            # that's what actually gets persisted to signal_history below.
+            for payload in (diag.qualified_signal, diag.developing_signal):
+                if payload is not None:
+                    payload["mtf_confirmed"] = mtf_result.get("confirmed")
+                    payload["sector_relative_strength_pct"] = (
+                        (diag.sector_relative_strength or {}).get("relative_strength_pct")
+                    )
 
     qualifying_signals = [d.qualified_signal for d in diagnostics if d.qualified_signal]
     developing_signals = [d.developing_signal for d in diagnostics if d.developing_signal]
@@ -123,7 +154,6 @@ async def run_full_scan() -> dict:
 
 
 def _lookup_sector_raw(symbol: str, results_15m: dict) -> dict | None:
-    from app.services.sector_map import get_sector_proxy
     proxy = get_sector_proxy(symbol)
     return results_15m.get(proxy)
 
@@ -154,6 +184,8 @@ async def _persist_signals(signals: list[dict]) -> list[dict]:
                 vwap_score=sig.get("vwap_score"),
                 market_score=sig.get("market_score"),
                 market_regime_detail=sig.get("market_regime_detail"),
+                mtf_confirmed=sig.get("mtf_confirmed"),
+                sector_relative_strength_pct=sig.get("sector_relative_strength_pct"),
             )
             session.add(record)
             records.append(record)

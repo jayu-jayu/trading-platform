@@ -644,6 +644,21 @@ function renderDiagnostics() {
         <span class="rl-status" style="color:var(--cyan);">INFO</span>
         <span class="rl-label">Confidence</span>
         <span class="rl-detail">${d.confidence_breakdown.confidence_pct}% — Trend ${d.confidence_breakdown.breakdown.trend}/30, Volume ${d.confidence_breakdown.breakdown.volume}/20, Momentum ${d.confidence_breakdown.breakdown.momentum}/20, VWAP ${d.confidence_breakdown.breakdown.vwap}/15, Market ${d.confidence_breakdown.breakdown.market}/15</span>
+      </div>` : "") + (d.mtf_confirmation ? `
+      <div class="detail-rule-line">
+        <span class="rl-status ${d.mtf_confirmation.confirmed ? "pass" : "fail"}">${d.mtf_confirmation.confirmed ? "PASS" : "INFO"}</span>
+        <span class="rl-label">MTF Confirmation</span>
+        <span class="rl-detail">${d.mtf_confirmation.detail}</span>
+      </div>` : "") + (d.relative_strength && d.relative_strength.detail ? `
+      <div class="detail-rule-line">
+        <span class="rl-status" style="color:var(--cyan);">INFO</span>
+        <span class="rl-label">Relative Strength</span>
+        <span class="rl-detail">${d.relative_strength.detail}</span>
+      </div>` : "") + (d.sector_relative_strength && d.sector_relative_strength.detail ? `
+      <div class="detail-rule-line">
+        <span class="rl-status" style="color:var(--cyan);">INFO</span>
+        <span class="rl-label">Sector Strength</span>
+        <span class="rl-detail">${d.sector_relative_strength.detail}</span>
       </div>` : "");
 
     return `

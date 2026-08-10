@@ -34,6 +34,10 @@ class SignalResponse(BaseModel):
     market_score: float | None = None
     market_regime_detail: str | None = None
 
+    # Phase 3 additions
+    mtf_confirmed: bool | None = None
+    sector_relative_strength_pct: float | None = None
+
 
 class SignalListResponse(BaseModel):
     scan_timestamp: datetime | None

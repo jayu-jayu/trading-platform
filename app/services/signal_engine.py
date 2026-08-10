@@ -36,6 +36,7 @@ from app.services.indicators import chart_result_to_df, add_indicators, compute_
 from app.services.sector_map import get_sector_proxy
 from app.services.market_analysis import compute_pivot_levels, describe_price_vs_pivots
 from app.services.confidence_engine import compute_confidence
+from app.services.sector_strength import compute_relative_strength
 
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -85,6 +86,11 @@ class SymbolDiagnostics:
     pivot_description: str = ""
     confidence_breakdown: dict | None = None  # {trend, volume, momentum, vwap, market} — see confidence_engine.py
 
+    # Phase 3 additions — also diagnostic-only.
+    relative_strength: dict | None = None  # stock vs Nifty (see sector_strength.py)
+    sector_relative_strength: dict | None = None  # sector proxy vs Nifty
+    mtf_confirmation: dict | None = None  # set post-hoc by scanner.py, only for near-qualifying symbols — see mtf_engine.py
+
     def to_dict(self) -> dict:
         return {
             "symbol": self.symbol,
@@ -103,6 +109,9 @@ class SymbolDiagnostics:
             "pivot_levels": self.pivot_levels,
             "pivot_description": self.pivot_description,
             "confidence_breakdown": self.confidence_breakdown,
+            "relative_strength": self.relative_strength,
+            "sector_relative_strength": self.sector_relative_strength,
+            "mtf_confirmation": self.mtf_confirmation,
         }
 
 
@@ -243,7 +252,8 @@ def _tier_for_count(count: int) -> str:
 async def evaluate_symbol(symbol: str, asset_type: str, df_15m_raw: dict | None,
                            market_regime: str, sector_15m_raw: dict | None,
                            as_of: datetime | None = None,
-                           market_regime_detail: dict | None = None) -> SymbolDiagnostics:
+                           market_regime_detail: dict | None = None,
+                           nifty_15m_raw: dict | None = None) -> SymbolDiagnostics:
     """
     Runs ALL 6 rules for one symbol and returns a full diagnostic breakdown
     — every rule's pass/fail and the exact numbers involved — regardless of
@@ -266,6 +276,12 @@ async def evaluate_symbol(symbol: str, asset_type: str, df_15m_raw: dict | None,
     diagnostic confidence breakdown's Market sub-score, never any of the
     6 gating rules, so existing callers that don't pass it are unaffected
     apart from that one diagnostic field falling back to a neutral default.
+
+    `nifty_15m_raw`: OPTIONAL (Phase 3). Nifty's own raw 15m data, used to
+    compute relative strength (stock vs Nifty, sector-proxy vs Nifty) —
+    diagnostic-only, same safety guarantee as market_regime_detail above.
+    Costs nothing extra to provide since scanner.py already fetches this
+    for the existing gatekeeper check.
     """
     diag = SymbolDiagnostics(symbol=symbol, asset_type=asset_type, data_available=True)
 
@@ -346,6 +362,23 @@ async def evaluate_symbol(symbol: str, asset_type: str, df_15m_raw: dict | None,
         diag.confidence_breakdown = None
         diag.pivot_description = diag.pivot_description or f"Confidence scoring unavailable: {exc}"
     # --- end Phase 2 additions ---
+
+    # --- Phase 3: relative strength vs Nifty, diagnostic-only. Costs
+    # nothing extra (Nifty data is already in hand), wrapped defensively
+    # for the same reason as the Phase 2 block above.
+    try:
+        nifty_df = chart_result_to_df(nifty_15m_raw.get("raw") if nifty_15m_raw else None)
+        if nifty_df is not None and len(nifty_df) >= 21:
+            diag.relative_strength = compute_relative_strength(df, nifty_df, label=symbol.replace(".NS", ""))
+
+            sector_df = chart_result_to_df(sector_15m_raw.get("raw") if sector_15m_raw else None)
+            if sector_df is not None and len(sector_df) >= 21:
+                diag.sector_relative_strength = compute_relative_strength(
+                    sector_df, nifty_df, label=f"sector proxy ({sector_proxy.replace('.NS', '')})"
+                )
+    except Exception:
+        pass  # relative strength is enrichment only — never let it affect the core result
+    # --- end Phase 3 relative strength ---
 
     if diag.tier in ("INSTITUTIONAL", "DEVELOPING") and diag.in_time_window:
         entry_price = float(last["close"])
