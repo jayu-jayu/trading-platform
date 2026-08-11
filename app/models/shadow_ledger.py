@@ -66,6 +66,7 @@ class ShadowLedgerEntry(Base):
     volume_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     momentum_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     vwap_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # False Signal Analyzer field (Phase blueprint item #6) — populated
     # once that module exists; schema is ready for it now.

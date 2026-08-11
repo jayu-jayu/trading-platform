@@ -552,6 +552,8 @@ function renderSignalCard(sig) {
       <span>RSI ${sig.rsi_value?.toFixed(1) ?? "—"}</span><span class="sep">·</span>
       <span>Vol ${sig.volume_ratio?.toFixed(1) ?? "—"}x</span><span class="sep">·</span>
       <span>Sector: ${(sig.sector_proxy || "—").replace(".NS", "")}</span>
+      ${sig.mtf_confirmed !== null && sig.mtf_confirmed !== undefined ? `<span class="sep">·</span><span style="color:${sig.mtf_confirmed ? "var(--emerald)" : "var(--faint)"}">MTF ${sig.mtf_confirmed ? "✓" : "✗"}</span>` : ""}
+      ${sig.sector_relative_strength_pct !== null && sig.sector_relative_strength_pct !== undefined ? `<span class="sep">·</span><span style="color:${sig.sector_relative_strength_pct > 0 ? "var(--emerald)" : "var(--rose)"}">RS ${sig.sector_relative_strength_pct > 0 ? "+" : ""}${sig.sector_relative_strength_pct.toFixed(2)}pp</span>` : ""}
     </div>
     <div class="rules-tags">
       ${sig.rules_passed.map(r => `<span class="rule-tag">✓ ${ruleLabel(r)}</span>`).join("")}
