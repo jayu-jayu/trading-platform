@@ -9,6 +9,14 @@ from app.schemas.signal import SignalListResponse, SignalResponse, MarketStatusR
 from app.schemas.diagnostics import DiagnosticsResponse
 from app.services.scanner import get_cached_scan, run_full_scan, get_market_status, get_cached_diagnostics
 from app.core.websocket_manager import manager as ws_manager
+from app.config import settings
+from app.core.auth import (
+    AuthConfigurationError,
+    SESSION_COOKIE_NAME,
+    is_same_origin,
+    is_valid_session_token,
+    validate_auth_configuration,
+)
 
 router = APIRouter(prefix="/api/signals", tags=["signals"])
 
@@ -74,6 +82,26 @@ async def get_diagnostics():
 
 @router.websocket("/ws")
 async def signals_websocket(websocket: WebSocket):
+    try:
+        validate_auth_configuration(
+            settings.AUTH_PASSWORD_HASH,
+            settings.AUTH_SESSION_SECRET,
+        )
+    except AuthConfigurationError:
+        await websocket.close(code=1011)
+        return
+
+    assert settings.AUTH_SESSION_SECRET is not None
+    if not is_same_origin(
+        websocket.headers.get("origin"),
+        websocket.headers.get("host"),
+    ) or not is_valid_session_token(
+        websocket.cookies.get(SESSION_COOKIE_NAME),
+        settings.AUTH_SESSION_SECRET,
+    ):
+        await websocket.close(code=1008)
+        return
+
     await ws_manager.connect(websocket)
     try:
         while True:

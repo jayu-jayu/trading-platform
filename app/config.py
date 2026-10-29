@@ -1,8 +1,4 @@
-"""
-Central settings for the single-service deployment. No auth, no per-user
-scoping — this app runs one shared paper-trading portfolio for whoever
-opens the URL, by design (see README).
-"""
+"""Central settings for the single-service deployment."""
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 
@@ -12,6 +8,8 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
     ENVIRONMENT: str = "production"
+    AUTH_PASSWORD_HASH: str | None = None
+    AUTH_SESSION_SECRET: str | None = None
 
     @field_validator("DATABASE_URL")
     @classmethod

@@ -1,22 +1,23 @@
-"""
-NSE Intraday Stock & ETF Signal Platform — single-service deployment.
-
-One FastAPI app serves both the JSON API (under /api/*) and the dashboard
-itself (a single embedded HTML/JS template at "/", no separate frontend
-build, no login). Designed for a 1-click Render web service deploy.
-"""
+"""NSE intraday signal platform — single-service deployment."""
 from contextlib import asynccontextmanager
 from pathlib import Path
 import asyncio
 import logging
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.db.session import AsyncSessionLocal
 from app.api.router import api_router
+from app.core.auth import (
+    AuthConfigurationError,
+    SESSION_COOKIE_NAME,
+    is_same_origin,
+    is_valid_session_token,
+    validate_auth_configuration,
+)
 from app.scheduler.jobs import start_scheduler, stop_scheduler
 from app.services.paper_trading import get_or_create_portfolio
 from app.services.data_fetcher import fetch_all
@@ -114,6 +115,14 @@ async def _verify_migrations_applied(session):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        validate_auth_configuration(
+            settings.AUTH_PASSWORD_HASH,
+            settings.AUTH_SESSION_SECRET,
+        )
+    except AuthConfigurationError as exc:
+        raise RuntimeError(str(exc)) from None
+
     # Schema management is now Alembic's job, not this app's — migrations
     # run via `alembic upgrade head` before this process starts (see
     # render.yaml's startCommand and the README migration guide). Running
@@ -141,12 +150,71 @@ app = FastAPI(
 app.include_router(api_router)
 
 
+@app.middleware("http")
+async def require_authenticated_session(request: Request, call_next):
+    if request.method not in ("GET", "HEAD", "OPTIONS") and not is_same_origin(
+        request.headers.get("origin"),
+        request.headers.get("host"),
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Request origin is not allowed."},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    if request.url.path in ("/health", "/login", "/api/auth/login", "/api/auth/logout"):
+        response = await call_next(request)
+        if request.url.path != "/health":
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    try:
+        validate_auth_configuration(
+            settings.AUTH_PASSWORD_HASH,
+            settings.AUTH_SESSION_SECRET,
+        )
+    except AuthConfigurationError:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Authentication is unavailable."},
+            headers={"Cache-Control": "no-store"},
+        )
+    assert settings.AUTH_SESSION_SECRET is not None
+
+    if not is_valid_session_token(
+        request.cookies.get(SESSION_COOKIE_NAME),
+        settings.AUTH_SESSION_SECRET,
+    ):
+        if request.method == "GET" and request.url.path == "/":
+            return RedirectResponse(
+                "/login",
+                status_code=303,
+                headers={"Cache-Control": "no-store"},
+            )
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Authentication required."},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    response = await call_next(request)
+    if request.url.path != "/health":
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Serves the single-password sign-in page."""
+    return templates.TemplateResponse(request, "login.html")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """Serves the entire dashboard — single HTML file, no build step."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "environment": settings.ENVIRONMENT}
+    return {"status": "ok"}

@@ -1,8 +1,4 @@
-"""
-Paper trading against the single shared portfolio (no login, no per-user
-scoping — see models/portfolio.py). get_or_create_portfolio ensures the
-one row always exists.
-"""
+"""Paper trading against the single shared portfolio."""
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime

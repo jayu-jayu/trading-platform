@@ -86,9 +86,9 @@ it), but better to avoid it by doing the stamp first.
 
 # NSE Intraday Signal Platform — Single-Service Edition
 
-One FastAPI application. No separate frontend build, no login, no Vercel —
-just `uvicorn app.main:app` and you have the full dashboard plus API on one
-URL. Built for a 1-click Render web service deploy.
+One FastAPI application. No separate frontend build or Vercel deployment —
+the protected dashboard and API are served from one URL. Built for a
+1-click Render web service deploy.
 
 ```
 nse-platform/
@@ -115,14 +115,33 @@ nse-platform/
 └── .env.example
 ```
 
-## No login, by design
+## Single-password access
 
-There is exactly one paper-trading portfolio, shared by anyone who opens
-the URL. Opening the dashboard drops you straight into the live signal
-feed — no sign-up, no auth token, nothing gating the view. This matches
-what you asked for; if you ever want to put this behind a password (e.g.
-before sharing the URL publicly), the cleanest option is Render's built-in
-"Basic Auth" environment toggle rather than rebuilding a login system.
+The dashboard, API, and signal WebSocket require a single password.
+Sessions use a signed, expiring, HttpOnly cookie. The public `/health`
+endpoint returns only a minimal liveness status; it does not report
+environment or credential information.
+
+Configure these values in the deployment platform's secret settings:
+
+- `AUTH_PASSWORD_HASH` — an scrypt password verifier, generated locally
+  with `python scripts/generate_auth_hash.py`. The helper prompts without
+  echoing the password. Store its output directly as a deployment secret;
+  do not commit it or include it in logs.
+- `AUTH_SESSION_SECRET` — a random secret of at least 32 bytes. Generate it
+  locally with `python -c "import secrets; print(secrets.token_urlsafe(48))"`
+  and store it as a deployment secret. Treat the printed value as sensitive;
+  do not commit it or include it in logs.
+
+Both settings are required. The application fails closed if either is
+missing or invalid. For local HTTP development, set `ENVIRONMENT=development`
+so the session cookie is not marked `Secure`; deployed environments must
+use HTTPS, where the cookie is marked `Secure`. The logout button clears
+the browser's session cookie. Sessions expire after eight hours.
+
+This application-level protection has not been verified against a live
+deployment. Confirm HTTPS, secret configuration, and protected routes on
+the actual deployed service before treating it as production-secure.
 
 ## The refined 6-Rule Engine
 
@@ -302,7 +321,8 @@ note at the top of this file).
 
 ## What's different from the original two-service version
 
-- **No auth** — `User` model, JWT, login/register endpoints all removed
+- **Single-password auth** — one protected dashboard session; there are no
+  per-user accounts or per-user portfolios
 - **No React/Vite** — the old `frontend/` project is gone; `templates/index.html`
   is the entire UI, vanilla JS, no build step
 - **Single shared portfolio** — `Portfolio` is a single DB row (id=1),
@@ -323,10 +343,9 @@ note at the top of this file).
   unofficial endpoint than the original 25-symbol version — if you start
   seeing fetch errors in the startup health check or diagnostics, rate
   limiting is the likely cause; increasing `SCAN_INTERVAL_MINUTES` helps.
-- **No auth means no per-user history.** If you deploy this publicly, every
-  visitor sees and can act on the same shared portfolio and position list.
-  Fine for a personal dashboard or demo; not fine for multiple people using
-  it independently — that would need auth reintroduced
+- **One shared portfolio remains.** The single-password gate is intended
+  for personal use; it does not provide separate accounts or per-user
+  histories for a multi-user deployment
 - **Sector/ETF correlation (Rule 6)** uses a simplified map (banking stocks
   → BANKBEES, IT stocks → ITBEES, everything else → NIFTYBEES) rather than
   a full sector-relative-strength model — a reasonable approximation, not

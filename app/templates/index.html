@@ -406,6 +406,7 @@
     <div class="header-actions">
       <button class="btn" id="scanBtn">Scan Now</button>
       <button class="btn primary" id="refreshBtn">Refresh All</button>
+      <button class="btn" id="logoutBtn">Log out</button>
     </div>
   </header>
 
@@ -546,6 +547,12 @@
 const API = "/api";
 let watchlistData = { STOCK: [], ETF: [] };
 let activeTab = "STOCK";
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const response = await nativeFetch(...args);
+  if (response.status === 401) window.location.replace("/login");
+  return response;
+};
 
 // ---------------- Utilities ----------------
 function fmtMoney(n) { return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 }); }
@@ -1089,6 +1096,15 @@ function connectWS() {
 document.getElementById("scanBtn").addEventListener("click", scanNow);
 document.getElementById("refreshBtn").addEventListener("click", () => {
   loadMarketStatus(); loadSignals(); loadPrices(); loadPortfolio(); loadDiagnostics();
+});
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+  try {
+    const response = await fetch(`${API}/auth/logout`, { method: "POST" });
+    if (response.ok) window.location.replace("/login");
+    else showToast("Could not sign out.");
+  } catch {
+    showToast("Could not sign out.");
+  }
 });
 
 tickClock();

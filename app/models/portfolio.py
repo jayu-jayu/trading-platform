@@ -6,9 +6,9 @@ from app.db.base import Base
 
 class Portfolio(Base):
     """
-    Single global paper-trading portfolio — there is no login, so the whole
-    app shares one virtual account. Always exactly one row (id=1),
-    created on first startup if missing. See services/paper_trading.py.
+    Single global paper-trading portfolio shared by the authenticated
+    dashboard. Always exactly one row (id=1), created on first startup if
+    missing. See services/paper_trading.py.
     """
     __tablename__ = "portfolio"
 

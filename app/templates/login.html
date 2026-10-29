@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Sign in · Signal Deck</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0B0F19; color: #E8EEF7; }
+    main { width: min(360px, calc(100vw - 40px)); padding: 28px; background: #1E293B; border: 1px solid #334155; border-radius: 12px; }
+    h1 { margin: 0 0 8px; font-size: 22px; }
+    p { color: #93A1B8; line-height: 1.5; }
+    label { display: block; margin: 22px 0 7px; color: #93A1B8; font-size: 13px; }
+    input, button { width: 100%; box-sizing: border-box; border-radius: 7px; font: inherit; }
+    input { padding: 11px; border: 1px solid #334155; background: #0B0F19; color: #E8EEF7; }
+    button { margin-top: 14px; padding: 11px; border: 0; background: #22D3EE; color: #04141A; font-weight: 700; cursor: pointer; }
+    #error { min-height: 1.4em; color: #FB7185; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Signal Deck</h1>
+    <p>Sign in to your private trading dashboard.</p>
+    <form id="loginForm">
+      <label for="password">Dashboard password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+      <button id="submitButton" type="submit">Sign in</button>
+      <p id="error" role="alert" aria-live="polite"></p>
+    </form>
+  </main>
+  <script>
+    const form = document.getElementById("loginForm");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = document.getElementById("submitButton");
+      const password = document.getElementById("password");
+      const error = document.getElementById("error");
+      button.disabled = true;
+      error.textContent = "";
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: password.value }),
+        });
+        if (!response.ok) {
+          error.textContent = response.status === 401
+            ? "Incorrect password."
+            : "Sign-in is unavailable. Try again later.";
+          return;
+        }
+        window.location.replace("/");
+      } catch {
+        error.textContent = "Could not connect. Try again later.";
+      } finally {
+        button.disabled = false;
+        password.value = "";
+      }
+    });
+  </script>
+</body>
+</html>
